@@ -1,0 +1,291 @@
+import sys
+import os
+import random
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
+                            QWidget, QLineEdit, QPushButton, QTabWidget, QLabel,
+                            QMessageBox, QInputDialog, QMenu)
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtCore import QUrl, QTimer, Qt
+from PyQt6.QtGui import QIcon, QPixmap, QAction
+from PIL import Image, ImageSequence
+import io
+
+class BrowserTab(QWebEngineView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_browser = parent
+
+class CatscapeBrowser(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.current_url = "https://neocities.org"
+        self.history = []
+        self.history_position = -1
+        self.cat_pet_count = 0
+        
+        self.setup_ui()
+        self.setup_cat_animation()
+        
+    def setup_ui(self):
+        self.setWindowTitle("Catscape Navigator - PyQt6")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Set window icon
+        if os.path.exists("icon.ico"):
+            self.setWindowIcon(QIcon("icon.ico"))
+        
+        # Central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        
+        # Top controls
+        top_layout = QHBoxLayout()
+        
+        # Navigation buttons
+        self.back_btn = QPushButton("←")
+        self.forward_btn = QPushButton("→")
+        self.reload_btn = QPushButton("↻")
+        self.new_tab_btn = QPushButton("+")
+        
+        self.back_btn.setFixedWidth(30)
+        self.forward_btn.setFixedWidth(30)
+        self.reload_btn.setFixedWidth(30)
+        self.new_tab_btn.setFixedWidth(30)
+        
+        self.back_btn.clicked.connect(self.go_back)
+        self.forward_btn.clicked.connect(self.go_forward)
+        self.reload_btn.clicked.connect(self.reload)
+        self.new_tab_btn.clicked.connect(self.new_tab)
+        
+        top_layout.addWidget(self.back_btn)
+        top_layout.addWidget(self.forward_btn)
+        top_layout.addWidget(self.reload_btn)
+        top_layout.addWidget(self.new_tab_btn)
+        
+        # URL display (clickable)
+        self.url_label = QLabel(self.current_url)
+        self.url_label.setStyleSheet("""
+            QLabel {
+                background-color: white;
+                border: 1px solid gray;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QLabel:hover {
+                background-color: #f0f0f0;
+            }
+        """)
+        self.url_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.url_label.mousePressEvent = self.show_url_dialog
+        top_layout.addWidget(self.url_label)
+        
+        # Go button
+        self.go_btn = QPushButton("Go")
+        self.go_btn.clicked.connect(self.navigate)
+        top_layout.addWidget(self.go_btn)
+        
+        # Cat label (for animation)
+        self.cat_label = QLabel()
+        self.cat_label.setFixedSize(32, 32)
+        self.cat_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cat_label.mousePressEvent = self.pet_cat
+        top_layout.addWidget(self.cat_label)
+        
+        # Menu button
+        self.menu_btn = QPushButton("☰")
+        self.menu_btn.setFixedWidth(30)
+        self.menu_btn.clicked.connect(self.show_menu)
+        top_layout.addWidget(self.menu_btn)
+        
+        layout.addLayout(top_layout)
+        
+        # Tab widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.tabCloseRequested.connect(self.close_tab)
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        
+        layout.addWidget(self.tab_widget)
+        
+        # Create first tab
+        self.new_tab()
+        
+    def setup_cat_animation(self):
+        try:
+            gif_path = os.path.join(os.getcwd(), "cat-anim.gif")
+            if os.path.exists(gif_path):
+                self.cat_frames = []
+                gif = Image.open(gif_path)
+                
+                for frame in ImageSequence.Iterator(gif):
+                    frame_resized = frame.resize((32, 32), Image.Resampling.LANCZOS)
+                    
+                    # Convert PIL image to QPixmap
+                    buffer = io.BytesIO()
+                    frame_resized.save(buffer, format="PNG")
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(buffer.getvalue())
+                    self.cat_frames.append(pixmap)
+                
+                self.cat_frame_index = 0
+                self.animate_cat()
+            else:
+                self.cat_label.setText("(^._.^)")
+        except Exception as e:
+            print(f"GIF error: {e}")
+            self.cat_label.setText("(^._.^)")
+    
+    def animate_cat(self):
+        if hasattr(self, 'cat_frames') and self.cat_frames:
+            self.cat_frame_index = (self.cat_frame_index + 1) % len(self.cat_frames)
+            self.cat_label.setPixmap(self.cat_frames[self.cat_frame_index])
+            QTimer.singleShot(100, self.animate_cat)
+    
+    def pet_cat(self, event):
+        self.cat_pet_count += 1
+        messages = [
+            "Purrrrr... the cat is happy!",
+            "Meow! Thanks for the pets!",
+            "Happy cat is happy! Keep browsing!",
+            "Virtual headbutts! The cat loves you!",
+            "The cat approves of your browsing skills!"
+        ]
+        QMessageBox.information(self, "Cat Petting", random.choice(messages))
+    
+    def show_url_dialog(self, event):
+        url, ok = QInputDialog.getText(
+            self, 
+            "Navigate to URL", 
+            "Enter the website address:",
+            text=self.current_url
+        )
+        
+        if ok and url:
+            self.current_url = url
+            self.url_label.setText(url[:50] + "..." if len(url) > 50 else url)
+            self.navigate()
+    
+    def new_tab(self, url=None):
+        if not url:
+            url = self.current_url
+            
+        tab = BrowserTab(self)
+        tab.load(QUrl(url))
+        
+        tab_index = self.tab_widget.addTab(tab, f"Tab {self.tab_widget.count() + 1}")
+        self.tab_widget.setCurrentIndex(tab_index)
+        
+        # Connect signals
+        tab.urlChanged.connect(lambda url: self.on_url_changed(tab, url))
+        tab.titleChanged.connect(lambda title: self.on_title_changed(tab, title))
+        
+        self.history.append(url)
+        self.history_position = len(self.history) - 1
+    
+    def on_url_changed(self, tab, url):
+        if self.tab_widget.currentWidget() == tab:
+            self.current_url = url.toString()
+            display_url = self.current_url[:50] + "..." if len(self.current_url) > 50 else self.current_url
+            self.url_label.setText(display_url)
+    
+    def on_title_changed(self, tab, title):
+        tab_index = self.tab_widget.indexOf(tab)
+        if tab_index >= 0:
+            display_title = title[:20] + "..." if len(title) > 20 else title
+            self.tab_widget.setTabText(tab_index, display_title)
+    
+    def navigate(self):
+        current_tab = self.tab_widget.currentWidget()
+        if current_tab:
+            current_tab.load(QUrl(self.current_url))
+            self.history.append(self.current_url)
+            self.history_position = len(self.history) - 1
+    
+    def go_back(self):
+        if self.history_position > 0:
+            self.history_position -= 1
+            url = self.history[self.history_position]
+            self.current_url = url
+            self.url_label.setText(url[:50] + "..." if len(url) > 50 else url)
+            
+            current_tab = self.tab_widget.currentWidget()
+            if current_tab:
+                current_tab.load(QUrl(url))
+    
+    def go_forward(self):
+        if self.history_position < len(self.history) - 1:
+            self.history_position += 1
+            url = self.history[self.history_position]
+            self.current_url = url
+            self.url_label.setText(url[:50] + "..." if len(url) > 50 else url)
+            
+            current_tab = self.tab_widget.currentWidget()
+            if current_tab:
+                current_tab.load(QUrl(url))
+    
+    def reload(self):
+        current_tab = self.tab_widget.currentWidget()
+        if current_tab:
+            current_tab.reload()
+    
+    def on_tab_changed(self, index):
+        if index >= 0:
+            current_tab = self.tab_widget.widget(index)
+            if current_tab:
+                self.current_url = current_tab.url().toString()
+                display_url = self.current_url[:50] + "..." if len(self.current_url) > 50 else self.current_url
+                self.url_label.setText(display_url)
+    
+    def close_tab(self, index):
+        if self.tab_widget.count() > 1:
+            self.tab_widget.removeTab(index)
+    
+    def show_menu(self):
+        menu = QMenu(self)
+        
+        new_tab_action = QAction("New Tab", self)
+        new_tab_action.triggered.connect(self.new_tab)
+        menu.addAction(new_tab_action)
+        
+        close_tab_action = QAction("Close Tab", self)
+        close_tab_action.triggered.connect(lambda: self.close_tab(self.tab_widget.currentIndex()))
+        menu.addAction(close_tab_action)
+        
+        menu.addSeparator()
+        
+        navigate_action = QAction("Navigate to URL...", self)
+        navigate_action.triggered.connect(self.show_url_dialog)
+        menu.addAction(navigate_action)
+        
+        view_source_action = QAction("View Source", self)
+        view_source_action.triggered.connect(self.view_source)
+        menu.addAction(view_source_action)
+        
+        menu.addSeparator()
+        
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about)
+        menu.addAction(about_action)
+        
+        menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
+    
+    def view_source(self):
+        current_tab = self.tab_widget.currentWidget()
+        if current_tab:
+            current_tab.load(QUrl("view-source:" + self.current_url))
+    
+    def show_about(self):
+        QMessageBox.about(self, "About Catscape Navigator",
+                         "Catscape Navigator\n"
+                         "A modern web browser built with PyQt6\n\n"
+                         "Features real embedded browser with full web support!")
+
+def main():
+    app = QApplication(sys.argv)
+    browser = CatscapeBrowser()
+    browser.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
